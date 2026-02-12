@@ -8,6 +8,8 @@ type TeamNode = TeamsConnection["nodes"][number];
 type ProjectNode = ProjectsConnection["nodes"][number];
 type IssueNode = IssuesConnection["nodes"][number];
 type CreateProjectInput = Parameters<SDKClient["createProject"]>[0];
+type UpdateProjectInput = Parameters<SDKClient["updateProject"]>[1];
+type UpdateProjectIdentifier = Parameters<SDKClient["updateProject"]>[0];
 type CreateIssueInput = Parameters<SDKClient["createIssue"]>[0];
 type UpdateIssueInput = Parameters<SDKClient["updateIssue"]>[1];
 type UpdateIssueIdentifier = Parameters<SDKClient["updateIssue"]>[0];
@@ -118,6 +120,15 @@ export class LinearApiClient {
 
   async createProject(input: CreateProjectInput): Promise<Awaited<ReturnType<SDKClient["createProject"]>>> {
     return this.execute("create-project", async () => this.client.createProject(input));
+  }
+
+  async updateProject(
+    projectIdentifier: UpdateProjectIdentifier,
+    input: UpdateProjectInput
+  ): Promise<Awaited<ReturnType<SDKClient["updateProject"]>>> {
+    return this.execute("update-project", async () =>
+      this.client.updateProject(projectIdentifier, input)
+    );
   }
 
   async createIssue(input: CreateIssueInput): Promise<Awaited<ReturnType<SDKClient["createIssue"]>>> {
