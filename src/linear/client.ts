@@ -4,6 +4,7 @@ type SDKClient = LinearClient;
 type TeamsConnection = Awaited<ReturnType<SDKClient["teams"]>>;
 type ProjectsConnection = Awaited<ReturnType<SDKClient["projects"]>>;
 type IssuesConnection = Awaited<ReturnType<SDKClient["issues"]>>;
+type ViewerNode = Awaited<SDKClient["viewer"]>;
 type TeamNode = TeamsConnection["nodes"][number];
 type ProjectNode = ProjectsConnection["nodes"][number];
 type IssueNode = IssuesConnection["nodes"][number];
@@ -49,6 +50,7 @@ export class LinearApiClientError extends Error {
 
 export class LinearApiClient {
   private readonly client: SDKClient;
+  private currentUser: ViewerNode | null = null;
 
   constructor(config: LinearApiClientConfig = {}) {
     const apiKey = config.apiKey ?? process.env.LINEAR_API_KEY;
@@ -66,6 +68,18 @@ export class LinearApiClient {
     return this.execute("get-teams", async () => {
       const result = await this.client.teams();
       return result.nodes;
+    });
+  }
+
+  async getCurrentUser(): Promise<ViewerNode> {
+    return this.execute("get-current-user", async () => {
+      if (this.currentUser) {
+        return this.currentUser;
+      }
+
+      const viewer = await this.client.viewer;
+      this.currentUser = viewer;
+      return viewer;
     });
   }
 
@@ -132,7 +146,13 @@ export class LinearApiClient {
   }
 
   async createIssue(input: CreateIssueInput): Promise<Awaited<ReturnType<SDKClient["createIssue"]>>> {
-    return this.execute("create-issue", async () => this.client.createIssue(input));
+    return this.execute("create-issue", async () => {
+      const currentUser = await this.getCurrentUser();
+      return this.client.createIssue({
+        ...input,
+        assigneeId: currentUser.id
+      });
+    });
   }
 
   async updateIssue(

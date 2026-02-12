@@ -33,6 +33,10 @@ type IssueLike = {
   description?: string | null;
   teamId?: string | null;
   parentId?: string | null;
+  assigneeId?: string | null;
+  assignee?: {
+    id: string;
+  } | null;
 };
 
 export interface SyncOptions {
@@ -136,6 +140,7 @@ async function ensureEpicsAndStories(
   }
 
   const issues = (await client.getIssuesByProject(project.id)) as IssueLike[];
+  const currentUser = await client.getCurrentUser();
   const teamId = await resolveTeamId(client, project, issues);
 
   for (const epicSpec of desiredEpics) {
@@ -156,6 +161,18 @@ async function ensureEpicsAndStories(
       issues.push(epicIssue);
       pushAction(report, "Created", "epic", epicSpec.title);
     } else {
+      if (getIssueAssigneeId(epicIssue) === null) {
+        await client.updateIssue(epicIssue.id, { assigneeId: currentUser.id });
+        epicIssue.assigneeId = currentUser.id;
+        pushAction(
+          report,
+          "Updated",
+          "epic",
+          epicSpec.title,
+          "Assigned issue to current user"
+        );
+      }
+
       const desiredEpicDescription = epicSpec.description;
       const currentEpicDescription = stripManagedMetadata(epicIssue.description);
 
@@ -192,6 +209,18 @@ async function ensureEpicsAndStories(
         issues.push(storyIssue);
         pushAction(report, "Created", "story", storySpec.title);
       } else {
+        if (getIssueAssigneeId(storyIssue) === null) {
+          await client.updateIssue(storyIssue.id, { assigneeId: currentUser.id });
+          storyIssue.assigneeId = currentUser.id;
+          pushAction(
+            report,
+            "Updated",
+            "story",
+            storySpec.title,
+            "Assigned issue to current user"
+          );
+        }
+
         const desiredStoryDescription = storySpec.description;
         const currentStoryDescription = stripManagedMetadata(storyIssue.description);
 
@@ -209,6 +238,14 @@ async function ensureEpicsAndStories(
       }
     }
   }
+}
+
+function getIssueAssigneeId(issue: IssueLike): string | null {
+  if (issue.assigneeId) {
+    return issue.assigneeId;
+  }
+
+  return issue.assignee?.id ?? null;
 }
 
 function pushAction(
