@@ -2,11 +2,16 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import yargs from "yargs";
 import { createLogger } from "./utils/logger";
+import { assignProjectIssues } from "./linear/project";
 import { syncProject, SyncAction, SyncStatus } from "./linear/sync";
 import { EpicSpec, ProjectSpec, StorySpec } from "./linear/types";
 
 interface SyncCommandArgs {
   file: string;
+}
+
+interface AssignProjectCommandArgs {
+  project: string;
 }
 
 export async function runCli(argv: string[]): Promise<void> {
@@ -29,6 +34,19 @@ export async function runCli(argv: string[]): Promise<void> {
           await handleSyncCommand({ file: String(args.file) }, logger);
         }
       )
+      .command(
+        "assign-project",
+        "Assign unassigned issues in a project to the current user",
+        (cmd) =>
+          cmd.option("project", {
+            type: "string",
+            demandOption: true,
+            description: "Project name"
+          }),
+        async (args) => {
+          await handleAssignProjectCommand({ project: String(args.project) }, logger);
+        }
+      )
       .demandCommand(1, "Provide a command")
       .strict()
       .help()
@@ -38,6 +56,22 @@ export async function runCli(argv: string[]): Promise<void> {
       .parseAsync();
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown CLI error";
+    logger.error(`Error: ${message}`);
+    process.exitCode = 1;
+  }
+}
+
+async function handleAssignProjectCommand(
+  args: AssignProjectCommandArgs,
+  logger: ReturnType<typeof createLogger>
+): Promise<void> {
+  try {
+    const result = await assignProjectIssues({ projectName: args.project });
+    logger.info(`Total issues: ${result.totalIssues}`);
+    logger.info(`Assigned count: ${result.assignedCount}`);
+    logger.info(`Skipped count: ${result.skippedCount}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
     logger.error(`Error: ${message}`);
     process.exitCode = 1;
   }
