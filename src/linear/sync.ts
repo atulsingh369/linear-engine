@@ -3,6 +3,20 @@ import { ProjectSpec } from "./types";
 
 const MANAGED_METADATA = "---\nmanagedBy: linear-engine\n---";
 
+export type SyncStatus = "Created" | "Updated" | "Skipped";
+export type SyncEntity = "project" | "milestone" | "epic" | "story";
+
+export interface SyncAction {
+  status: SyncStatus;
+  entity: SyncEntity;
+  name: string;
+  reason?: string;
+}
+
+export interface SyncReport {
+  actions: SyncAction[];
+}
+
 type ProjectLike = {
   id: string;
   name: string;
@@ -32,15 +46,20 @@ export async function runLinearSync(_options: SyncOptions = {}): Promise<void> {
 export async function syncProject(
   spec: ProjectSpec,
   client: LinearApiClient = createLinearApiClient()
-): Promise<void> {
-  const project = await ensureProject(client, spec);
-  await ensureMilestones(client, project, spec);
-  await ensureEpicsAndStories(client, project, spec);
+): Promise<SyncReport> {
+  const report: SyncReport = { actions: [] };
+
+  const project = await ensureProject(client, spec, report);
+  await ensureMilestones(client, project, spec, report);
+  await ensureEpicsAndStories(client, project, spec, report);
+
+  return report;
 }
 
 async function ensureProject(
   client: LinearApiClient,
-  spec: ProjectSpec
+  spec: ProjectSpec,
+  report: SyncReport
 ): Promise<ProjectLike> {
   const projectName = spec.project.name.trim();
   if (!projectName) {
@@ -57,8 +76,10 @@ async function ensureProject(
     });
     const createdProject = (createResult as { project?: ProjectLike }).project;
     if (!createdProject) {
-      throw new Error(`Failed to create project "${projectName}".`);
+      throw new Error(`Failed to create project \"${projectName}\".`);
     }
+
+    pushAction(report, "Created", "project", projectName);
     return createdProject;
   }
 
@@ -67,6 +88,9 @@ async function ensureProject(
     await client.updateProject(existingProject.id, {
       description: desiredDescription
     });
+    pushAction(report, "Updated", "project", projectName);
+  } else {
+    pushAction(report, "Skipped", "project", projectName, "description unchanged");
   }
 
   return existingProject;
@@ -75,7 +99,8 @@ async function ensureProject(
 async function ensureMilestones(
   client: LinearApiClient,
   project: ProjectLike,
-  spec: ProjectSpec
+  spec: ProjectSpec,
+  report: SyncReport
 ): Promise<void> {
   const desiredMilestones = spec.milestones ?? [];
   if (desiredMilestones.length === 0) {
@@ -91,14 +116,19 @@ async function ensureMilestones(
         projectId: project.id,
         name: milestone.name
       });
+      pushAction(report, "Created", "milestone", milestone.name);
+      continue;
     }
+
+    pushAction(report, "Skipped", "milestone", milestone.name, "already exists");
   }
 }
 
 async function ensureEpicsAndStories(
   client: LinearApiClient,
   project: ProjectLike,
-  spec: ProjectSpec
+  spec: ProjectSpec,
+  report: SyncReport
 ): Promise<void> {
   const desiredEpics = spec.epics ?? [];
   if (desiredEpics.length === 0) {
@@ -120,17 +150,26 @@ async function ensureEpicsAndStories(
       });
       epicIssue = (createdEpic as { issue?: IssueLike }).issue ?? null;
       if (!epicIssue) {
-        throw new Error(`Failed to create epic "${epicSpec.title}".`);
+        throw new Error(`Failed to create epic \"${epicSpec.title}\".`);
       }
+
       issues.push(epicIssue);
-    } else if (
-      isManaged(epicIssue.description) &&
-      stripManagedMetadata(epicIssue.description) !== epicSpec.description
-    ) {
-      await client.updateIssue(epicIssue.id, {
-        description: withManagedMetadata(epicSpec.description)
-      });
-      epicIssue.description = withManagedMetadata(epicSpec.description);
+      pushAction(report, "Created", "epic", epicSpec.title);
+    } else {
+      const desiredEpicDescription = epicSpec.description;
+      const currentEpicDescription = stripManagedMetadata(epicIssue.description);
+
+      if (currentEpicDescription === desiredEpicDescription) {
+        pushAction(report, "Skipped", "epic", epicSpec.title, "description unchanged");
+      } else if (!isManaged(epicIssue.description)) {
+        pushAction(report, "Skipped", "epic", epicSpec.title, "not managed by tool");
+      } else {
+        await client.updateIssue(epicIssue.id, {
+          description: withManagedMetadata(desiredEpicDescription)
+        });
+        epicIssue.description = withManagedMetadata(desiredEpicDescription);
+        pushAction(report, "Updated", "epic", epicSpec.title);
+      }
     }
 
     const desiredStories = epicSpec.stories ?? [];
@@ -147,20 +186,39 @@ async function ensureEpicsAndStories(
         });
         storyIssue = (createdStory as { issue?: IssueLike }).issue ?? null;
         if (!storyIssue) {
-          throw new Error(`Failed to create story "${storySpec.title}".`);
+          throw new Error(`Failed to create story \"${storySpec.title}\".`);
         }
+
         issues.push(storyIssue);
-      } else if (
-        isManaged(storyIssue.description) &&
-        stripManagedMetadata(storyIssue.description) !== storySpec.description
-      ) {
-        await client.updateIssue(storyIssue.id, {
-          description: withManagedMetadata(storySpec.description)
-        });
-        storyIssue.description = withManagedMetadata(storySpec.description);
+        pushAction(report, "Created", "story", storySpec.title);
+      } else {
+        const desiredStoryDescription = storySpec.description;
+        const currentStoryDescription = stripManagedMetadata(storyIssue.description);
+
+        if (currentStoryDescription === desiredStoryDescription) {
+          pushAction(report, "Skipped", "story", storySpec.title, "description unchanged");
+        } else if (!isManaged(storyIssue.description)) {
+          pushAction(report, "Skipped", "story", storySpec.title, "not managed by tool");
+        } else {
+          await client.updateIssue(storyIssue.id, {
+            description: withManagedMetadata(desiredStoryDescription)
+          });
+          storyIssue.description = withManagedMetadata(desiredStoryDescription);
+          pushAction(report, "Updated", "story", storySpec.title);
+        }
       }
     }
   }
+}
+
+function pushAction(
+  report: SyncReport,
+  status: SyncStatus,
+  entity: SyncEntity,
+  name: string,
+  reason?: string
+): void {
+  report.actions.push({ status, entity, name, reason });
 }
 
 function findIssueByTitle(
