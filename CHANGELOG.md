@@ -20,8 +20,13 @@
   - Also continues to support `--issue "<title>"`.
 - `linear sync --file <path>`
   - Supports optional assignee rules on epics/stories via `assignee` field.
+  - Supports optional milestone mapping on epics/stories via `milestone` field.
   - If `assignee` is set, sync resolves and applies it.
   - If not set, sync defaults to current authenticated user only when issue is unassigned.
+  - Milestone mapping behavior:
+    - Epic: `epic.milestone` if provided, otherwise milestone matching epic title from `spec.milestones`.
+    - Story: `story.milestone` if provided, otherwise inherits `epic.milestone`.
+  - Epics and stories are attached to milestones with `projectMilestoneId`.
   - Preserves existing workflow state (does not change `stateId`).
   - Adds `managedBy: linear-engine` metadata block to synced issue descriptions.
 - `linear assign-project --project "<project-name>" [--force]`
@@ -44,6 +49,12 @@
 - `linear assign-project --project "Core Platform"`
 - `linear assign-project --project "Core Platform" --force`
 - `linear sync --file ./specs/project.json --json`
+- `linear sync --file ./linear-spec.json`
+
+### ProjectSpec additions
+
+- `EpicSpec.milestone?: string`
+- `StorySpec.milestone?: string`
 
 ## Expected Outputs
 

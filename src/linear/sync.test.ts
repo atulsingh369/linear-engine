@@ -15,7 +15,8 @@ function createMockClient(overrides: Record<string, unknown> = {}): LinearApiCli
     updateIssue: vi.fn(),
     createMilestone: vi.fn(),
     findUserByIdentifier: vi.fn(),
-    getIssueByKey: vi.fn()
+    getIssueByKey: vi.fn(),
+    getProjects: vi.fn().mockResolvedValue([])
   };
 
   return { ...base, ...overrides } as unknown as LinearApiClient;
@@ -87,5 +88,69 @@ describe("syncProject", () => {
       (call) => call[1] && Object.prototype.hasOwnProperty.call(call[1], "assigneeId")
     );
     expect(assigneeUpdates).toHaveLength(0);
+  });
+
+  it("assigns epic and story milestones when milestone fields are provided", async () => {
+    const updateIssue = vi.fn().mockResolvedValue({ success: true });
+    const createIssue = vi
+      .fn()
+      .mockResolvedValueOnce({
+        issue: { id: "epic-1", title: "Epic A", teamId: "t1" }
+      })
+      .mockResolvedValueOnce({
+        issue: { id: "story-1", title: "Story A", teamId: "t1", parentId: "epic-1" }
+      });
+
+    const projectNode = {
+      id: "p1",
+      name: "Engine",
+      teamId: "t1",
+      projectMilestones: vi.fn().mockResolvedValue({
+        nodes: [
+          { id: "m1", name: "Phase 1" },
+          { id: "m2", name: "Phase 2" }
+        ]
+      })
+    };
+
+    const client = createMockClient({
+      getProjectByName: vi.fn().mockResolvedValue(projectNode),
+      getProjects: vi.fn().mockResolvedValue([projectNode]),
+      getIssuesByProject: vi.fn().mockResolvedValue([]),
+      getCurrentUser: vi.fn().mockResolvedValue({ id: "u1" }),
+      createIssue,
+      updateIssue
+    });
+
+    const spec: ProjectSpec = {
+      project: { name: "Engine", description: "desc" },
+      milestones: [{ name: "Phase 1" }, { name: "Phase 2" }],
+      epics: [
+        {
+          title: "Epic A",
+          description: "Build it",
+          milestone: "Phase 1",
+          stories: [
+            {
+              title: "Story A",
+              description: "Implement it",
+              milestone: "Phase 2"
+            }
+          ]
+        }
+      ]
+    };
+
+    await syncProject(spec, client);
+
+    const milestoneUpdates = updateIssue.mock.calls.filter(
+      (call) => call[1] && Object.prototype.hasOwnProperty.call(call[1], "projectMilestoneId")
+    );
+    expect(milestoneUpdates).toEqual(
+      expect.arrayContaining([
+        ["epic-1", { projectMilestoneId: "m1" }],
+        ["story-1", { projectMilestoneId: "m2" }]
+      ])
+    );
   });
 });

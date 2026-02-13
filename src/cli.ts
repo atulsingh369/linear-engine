@@ -509,6 +509,9 @@ function isEpicSpec(value: unknown): value is EpicSpec {
   if (value.assignee !== undefined && !isString(value.assignee)) {
     return false;
   }
+  if (value.milestone !== undefined && !isString(value.milestone)) {
+    return false;
+  }
 
   if (value.stories !== undefined) {
     if (!Array.isArray(value.stories)) {
@@ -534,6 +537,9 @@ function isStorySpec(value: unknown): value is StorySpec {
   }
 
   if (value.assignee !== undefined && !isString(value.assignee)) {
+    return false;
+  }
+  if (value.milestone !== undefined && !isString(value.milestone)) {
     return false;
   }
 

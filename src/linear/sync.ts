@@ -1,10 +1,15 @@
 import { createLinearApiClient, LinearApiClient } from "./client";
-import { ProjectSpec } from "./types";
+import { EpicSpec, ProjectSpec } from "./types";
 
 const MANAGED_METADATA_LINE = "managedBy: linear-engine";
 
 export type SyncStatus = "Created" | "Updated" | "Skipped";
-export type SyncEntity = "project" | "milestone" | "epic" | "story";
+export type SyncEntity =
+  | "project"
+  | "milestone"
+  | "epic"
+  | "story"
+  | "milestone-assignment";
 
 export interface SyncAction {
   status: SyncStatus;
@@ -28,6 +33,7 @@ type ProjectLike = {
 };
 
 type MilestoneLike = {
+  id: string;
   name: string;
 };
 
@@ -37,6 +43,7 @@ type IssueLike = {
   description?: string | null;
   teamId?: string | null;
   parentId?: string | null;
+  projectMilestoneId?: string | null;
   assigneeId?: string | null;
   assignee?: {
     id: string;
@@ -110,25 +117,33 @@ async function ensureMilestones(
   spec: ProjectSpec,
   report: SyncReport
 ): Promise<void> {
-  const desiredMilestones = spec.milestones ?? [];
-  if (desiredMilestones.length === 0) {
+  const desiredMilestoneNames = collectDesiredMilestoneNames(spec);
+  if (desiredMilestoneNames.size === 0) {
     return;
   }
 
-  const existingMilestones = await getProjectMilestones(project);
+  const existingMilestones = await getProjectMilestones(project, desiredMilestoneNames.size > 0);
   const existingNames = new Set(existingMilestones.map((milestone) => milestone.name));
 
-  for (const milestone of desiredMilestones) {
-    if (!existingNames.has(milestone.name)) {
+  for (const milestoneName of desiredMilestoneNames) {
+    if (!existingNames.has(milestoneName)) {
       await client.createMilestone({
         projectId: project.id,
-        name: milestone.name
+        name: milestoneName
       });
-      pushAction(report, "Created", "milestone", milestone.name);
+      pushAction(report, "Created", "milestone", milestoneName);
       continue;
     }
 
-    pushAction(report, "Skipped", "milestone", milestone.name, "already exists");
+    pushAction(report, "Skipped", "milestone", milestoneName, "already exists");
+  }
+
+  const resolvedMilestones = await getProjectMilestones(project, desiredMilestoneNames.size > 0);
+  const resolvedMilestoneNames = new Set(resolvedMilestones.map((milestone) => milestone.name));
+  for (const milestoneName of desiredMilestoneNames) {
+    if (!resolvedMilestoneNames.has(milestoneName)) {
+      throw new Error(`Milestone exists in spec but could not be resolved: ${milestoneName}`);
+    }
   }
 }
 
@@ -153,6 +168,8 @@ async function ensureEpicsAndStories(
       epicSpec.assignee,
       currentUser.id
     );
+
+    const epicMilestoneName = resolveEpicMilestoneName(spec, epicSpec);
 
     let epicIssue = findIssueByTitle(issues, epicSpec.title, null);
 
@@ -194,8 +211,29 @@ async function ensureEpicsAndStories(
       }
     }
 
+    if (epicMilestoneName) {
+      const assigned = await attachIssueToMilestone(
+        client,
+        epicIssue.id,
+        project.id,
+        epicMilestoneName
+      );
+      if (assigned) {
+        pushAction(report, "Updated", "epic", epicSpec.title, "milestone assigned");
+        pushAction(
+          report,
+          "Updated",
+          "milestone-assignment",
+          epicSpec.title,
+          `milestone assigned: ${epicMilestoneName}`
+        );
+      }
+    }
+
     const desiredStories = epicSpec.stories ?? [];
     for (const storySpec of desiredStories) {
+      const storyMilestoneName = resolveStoryMilestoneName(epicSpec.milestone, storySpec.milestone);
+
       const desiredStoryAssigneeId = await resolveDesiredAssigneeId(
         client,
         storySpec.assignee,
@@ -243,6 +281,25 @@ async function ensureEpicsAndStories(
           pushAction(report, "Updated", "story", storySpec.title, "description synchronized");
         } else {
           pushAction(report, "Skipped", "story", storySpec.title, "description unchanged");
+        }
+      }
+
+      if (storyMilestoneName) {
+        const assigned = await attachIssueToMilestone(
+          client,
+          storyIssue.id,
+          project.id,
+          storyMilestoneName
+        );
+        if (assigned) {
+          pushAction(report, "Updated", "story", storySpec.title, "milestone assigned");
+          pushAction(
+            report,
+            "Updated",
+            "milestone-assignment",
+            storySpec.title,
+            `milestone assigned: ${storyMilestoneName}`
+          );
         }
       }
     }
@@ -334,8 +391,15 @@ function normalizeParentId(parentId: string | null | undefined): string | null {
   return parentId ?? null;
 }
 
-async function getProjectMilestones(project: ProjectLike): Promise<MilestoneLike[]> {
+async function getProjectMilestones(
+  project: ProjectLike,
+  required: boolean
+): Promise<MilestoneLike[]> {
   if (typeof project.projectMilestones !== "function") {
+    if (required) {
+      throw new Error("Unable to query project milestones for this project.");
+    }
+
     return [];
   }
 
@@ -383,6 +447,95 @@ function ensureManagedMetadata(description: string): string {
   }
 
   return `${MANAGED_METADATA_LINE}\n\n${stripped}`;
+}
+
+function collectDesiredMilestoneNames(spec: ProjectSpec): Set<string> {
+  const names = new Set<string>();
+
+  for (const milestone of spec.milestones ?? []) {
+    if (milestone.name.trim()) {
+      names.add(milestone.name.trim());
+    }
+  }
+
+  for (const epic of spec.epics ?? []) {
+    const epicMilestoneName = resolveEpicMilestoneName(spec, epic);
+    if (epicMilestoneName) {
+      names.add(epicMilestoneName);
+    }
+
+    for (const story of epic.stories ?? []) {
+      const storyMilestoneName = resolveStoryMilestoneName(epic.milestone, story.milestone);
+      if (storyMilestoneName) {
+        names.add(storyMilestoneName);
+      }
+    }
+  }
+
+  return names;
+}
+
+function resolveEpicMilestoneName(spec: ProjectSpec, epic: EpicSpec): string | undefined {
+  const explicitName = epic.milestone?.trim();
+  if (explicitName) {
+    return explicitName;
+  }
+
+  const matchingTopLevel = spec.milestones?.find(
+    (milestone) => milestone.name.trim() === epic.title.trim()
+  );
+  if (matchingTopLevel?.name.trim()) {
+    return matchingTopLevel.name.trim();
+  }
+
+  return undefined;
+}
+
+function resolveStoryMilestoneName(
+  epicMilestone: string | undefined,
+  storyMilestone: string | undefined
+): string | undefined {
+  const explicitStory = storyMilestone?.trim();
+  if (explicitStory) {
+    return explicitStory;
+  }
+
+  const inheritedEpic = epicMilestone?.trim();
+  if (inheritedEpic) {
+    return inheritedEpic;
+  }
+
+  return undefined;
+}
+
+async function attachIssueToMilestone(
+  client: LinearApiClient,
+  issueId: string,
+  projectId: string,
+  milestoneName: string
+): Promise<boolean> {
+  const normalizedName = milestoneName.trim();
+  if (!normalizedName) {
+    return false;
+  }
+
+  const project = (await client.getProjects()).find((candidate) => candidate.id === projectId) as
+    | (ProjectLike & { projectMilestones?: () => Promise<{ nodes: MilestoneLike[] }> })
+    | undefined;
+  if (!project || typeof project.projectMilestones !== "function") {
+    return false;
+  }
+
+  const milestoneResult = await project.projectMilestones();
+  const foundMilestone = milestoneResult.nodes.find(
+    (milestone) => milestone.name === normalizedName
+  );
+  if (!foundMilestone) {
+    return false;
+  }
+
+  await client.updateIssue(issueId, { projectMilestoneId: foundMilestone.id });
+  return true;
 }
 
 function stripManagedMetadata(description: string | null | undefined): string {

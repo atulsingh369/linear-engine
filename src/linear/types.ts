@@ -2,12 +2,14 @@ export interface StorySpec {
   title: string;
   description: string;
   assignee?: string;
+  milestone?: string;
 }
 
 export interface EpicSpec {
   title: string;
   description: string;
   assignee?: string;
+  milestone?: string;
   stories?: StorySpec[];
 }
 
