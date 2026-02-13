@@ -1,7 +1,7 @@
 import { createLinearApiClient, LinearApiClient } from "./client";
 import { ProjectSpec } from "./types";
 
-const MANAGED_METADATA = "---\nmanagedBy: linear-engine\n---";
+const MANAGED_METADATA_LINE = "managedBy: linear-engine";
 
 export type SyncStatus = "Created" | "Updated" | "Skipped";
 export type SyncEntity = "project" | "milestone" | "epic" | "story";
@@ -21,6 +21,10 @@ type ProjectLike = {
   id: string;
   name: string;
   description?: string | null;
+  teamId?: string | null;
+  teamIds?: string[] | null;
+  projectMilestones?: () => Promise<{ nodes: MilestoneLike[] }>;
+  teams?: () => Promise<{ nodes: Array<{ id: string }> }>;
 };
 
 type MilestoneLike = {
@@ -144,6 +148,12 @@ async function ensureEpicsAndStories(
   const teamId = await resolveTeamId(client, project, issues);
 
   for (const epicSpec of desiredEpics) {
+    const desiredEpicAssigneeId = await resolveDesiredAssigneeId(
+      client,
+      epicSpec.assignee,
+      currentUser.id
+    );
+
     let epicIssue = findIssueByTitle(issues, epicSpec.title, null);
 
     if (!epicIssue) {
@@ -151,7 +161,8 @@ async function ensureEpicsAndStories(
         teamId,
         projectId: project.id,
         title: epicSpec.title,
-        description: withManagedMetadata(epicSpec.description)
+        description: ensureManagedMetadata(epicSpec.description),
+        assigneeId: desiredEpicAssigneeId
       });
       epicIssue = (createdEpic as { issue?: IssueLike }).issue ?? null;
       if (!epicIssue) {
@@ -161,36 +172,36 @@ async function ensureEpicsAndStories(
       issues.push(epicIssue);
       pushAction(report, "Created", "epic", epicSpec.title);
     } else {
-      if (getIssueAssigneeId(epicIssue) === null) {
-        await client.updateIssue(epicIssue.id, { assigneeId: currentUser.id });
-        epicIssue.assigneeId = currentUser.id;
-        pushAction(
-          report,
-          "Updated",
-          "epic",
-          epicSpec.title,
-          "Assigned issue to current user"
-        );
-      }
+      await syncIssueAssignee(
+        client,
+        epicIssue,
+        desiredEpicAssigneeId,
+        Boolean(epicSpec.assignee),
+        report,
+        "epic",
+        epicSpec.title
+      );
 
-      const desiredEpicDescription = epicSpec.description;
-      const currentEpicDescription = stripManagedMetadata(epicIssue.description);
-
-      if (currentEpicDescription === desiredEpicDescription) {
-        pushAction(report, "Skipped", "epic", epicSpec.title, "description unchanged");
-      } else if (!isManaged(epicIssue.description)) {
-        pushAction(report, "Skipped", "epic", epicSpec.title, "not managed by tool");
-      } else {
+      const desiredEpicDescription = ensureManagedMetadata(epicSpec.description);
+      if (normalizeDescription(epicIssue.description) !== normalizeDescription(desiredEpicDescription)) {
         await client.updateIssue(epicIssue.id, {
-          description: withManagedMetadata(desiredEpicDescription)
+          description: desiredEpicDescription
         });
-        epicIssue.description = withManagedMetadata(desiredEpicDescription);
-        pushAction(report, "Updated", "epic", epicSpec.title);
+        epicIssue.description = desiredEpicDescription;
+        pushAction(report, "Updated", "epic", epicSpec.title, "description synchronized");
+      } else {
+        pushAction(report, "Skipped", "epic", epicSpec.title, "description unchanged");
       }
     }
 
     const desiredStories = epicSpec.stories ?? [];
     for (const storySpec of desiredStories) {
+      const desiredStoryAssigneeId = await resolveDesiredAssigneeId(
+        client,
+        storySpec.assignee,
+        currentUser.id
+      );
+
       let storyIssue = findIssueByTitle(issues, storySpec.title, epicIssue.id);
 
       if (!storyIssue) {
@@ -199,7 +210,8 @@ async function ensureEpicsAndStories(
           projectId: project.id,
           parentId: epicIssue.id,
           title: storySpec.title,
-          description: withManagedMetadata(storySpec.description)
+          description: ensureManagedMetadata(storySpec.description),
+          assigneeId: desiredStoryAssigneeId
         });
         storyIssue = (createdStory as { issue?: IssueLike }).issue ?? null;
         if (!storyIssue) {
@@ -209,53 +221,101 @@ async function ensureEpicsAndStories(
         issues.push(storyIssue);
         pushAction(report, "Created", "story", storySpec.title);
       } else {
-        if (getIssueAssigneeId(storyIssue) === null) {
-          await client.updateIssue(storyIssue.id, { assigneeId: currentUser.id });
-          storyIssue.assigneeId = currentUser.id;
-          pushAction(
-            report,
-            "Updated",
-            "story",
-            storySpec.title,
-            "Assigned issue to current user"
-          );
-        }
+        await syncIssueAssignee(
+          client,
+          storyIssue,
+          desiredStoryAssigneeId,
+          Boolean(storySpec.assignee),
+          report,
+          "story",
+          storySpec.title
+        );
 
-        const desiredStoryDescription = storySpec.description;
-        const currentStoryDescription = stripManagedMetadata(storyIssue.description);
-
-        if (currentStoryDescription === desiredStoryDescription) {
-          pushAction(report, "Skipped", "story", storySpec.title, "description unchanged");
-        } else if (!isManaged(storyIssue.description)) {
-          pushAction(report, "Skipped", "story", storySpec.title, "not managed by tool");
-        } else {
+        const desiredStoryDescription = ensureManagedMetadata(storySpec.description);
+        if (
+          normalizeDescription(storyIssue.description) !==
+          normalizeDescription(desiredStoryDescription)
+        ) {
           await client.updateIssue(storyIssue.id, {
-            description: withManagedMetadata(desiredStoryDescription)
+            description: desiredStoryDescription
           });
-          storyIssue.description = withManagedMetadata(desiredStoryDescription);
-          pushAction(report, "Updated", "story", storySpec.title);
+          storyIssue.description = desiredStoryDescription;
+          pushAction(report, "Updated", "story", storySpec.title, "description synchronized");
+        } else {
+          pushAction(report, "Skipped", "story", storySpec.title, "description unchanged");
         }
       }
     }
   }
 }
 
-function getIssueAssigneeId(issue: IssueLike): string | null {
+async function syncIssueAssignee(
+  client: LinearApiClient,
+  issue: IssueLike,
+  desiredAssigneeId: string,
+  explicitAssigneeInSpec: boolean,
+  report: SyncReport,
+  entity: SyncEntity,
+  name: string
+): Promise<void> {
+  const currentAssigneeId = getIssueAssigneeId(issue);
+
+  if (explicitAssigneeInSpec) {
+    if (currentAssigneeId !== desiredAssigneeId) {
+      await client.updateIssue(issue.id, { assigneeId: desiredAssigneeId });
+      issue.assigneeId = desiredAssigneeId;
+      pushAction(report, "Updated", entity, name, "assignee set from spec");
+    }
+    return;
+  }
+
+  if (currentAssigneeId === null) {
+    await client.updateIssue(issue.id, { assigneeId: desiredAssigneeId });
+    issue.assigneeId = desiredAssigneeId;
+    pushAction(report, "Updated", entity, name, "Assigned issue to current user");
+  }
+}
+
+async function resolveDesiredAssigneeId(
+  client: LinearApiClient,
+  assigneeReference: string | undefined,
+  defaultAssigneeId: string
+): Promise<string> {
+  if (!assigneeReference) {
+    return defaultAssigneeId;
+  }
+
+  const normalizedReference = assigneeReference.trim();
+  if (!normalizedReference) {
+    return defaultAssigneeId;
+  }
+
+  const user = await client.findUserByIdentifier(normalizedReference);
+  if (user) {
+    return user.id;
+  }
+
+  const issue = await client.getIssueByKey(normalizedReference);
+  if (issue) {
+    const issueAssigneeId = getIssueAssigneeId(issue as IssueLike);
+    if (issueAssigneeId) {
+      return issueAssigneeId;
+    }
+
+    throw new Error(
+      `Assignee reference ${normalizedReference} points to an issue without an assignee.`
+    );
+  }
+
+  throw new Error(`Unable to resolve assignee reference: ${normalizedReference}`);
+}
+
+function getIssueAssigneeId(issue: { assigneeId?: string | null; assignee?: { id: string } | null }): string | null {
   if (issue.assigneeId) {
     return issue.assigneeId;
   }
 
   return issue.assignee?.id ?? null;
-}
-
-function pushAction(
-  report: SyncReport,
-  status: SyncStatus,
-  entity: SyncEntity,
-  name: string,
-  reason?: string
-): void {
-  report.actions.push({ status, entity, name, reason });
 }
 
 function findIssueByTitle(
@@ -275,17 +335,11 @@ function normalizeParentId(parentId: string | null | undefined): string | null {
 }
 
 async function getProjectMilestones(project: ProjectLike): Promise<MilestoneLike[]> {
-  const milestoneGetter = (
-    project as {
-      projectMilestones?: () => Promise<{ nodes: MilestoneLike[] }>;
-    }
-  ).projectMilestones;
-
-  if (typeof milestoneGetter !== "function") {
+  if (typeof project.projectMilestones !== "function") {
     return [];
   }
 
-  const result = await milestoneGetter.call(project);
+  const result = await project.projectMilestones();
   return result.nodes;
 }
 
@@ -294,14 +348,12 @@ async function resolveTeamId(
   project: ProjectLike,
   issues: IssueLike[]
 ): Promise<string> {
-  const explicitTeamId = (project as { teamId?: string | null }).teamId;
-  if (explicitTeamId) {
-    return explicitTeamId;
+  if (project.teamId) {
+    return project.teamId;
   }
 
-  const teamIds = (project as { teamIds?: string[] | null }).teamIds;
-  if (teamIds && teamIds.length > 0) {
-    return teamIds[0];
+  if (project.teamIds && project.teamIds.length > 0) {
+    return project.teamIds[0];
   }
 
   const issueTeamId = issues.find((issue) => Boolean(issue.teamId))?.teamId;
@@ -309,13 +361,8 @@ async function resolveTeamId(
     return issueTeamId;
   }
 
-  const teamConnectionGetter = (
-    project as {
-      teams?: () => Promise<{ nodes: Array<{ id: string }> }>;
-    }
-  ).teams;
-  if (typeof teamConnectionGetter === "function") {
-    const teams = await teamConnectionGetter.call(project);
+  if (typeof project.teams === "function") {
+    const teams = await project.teams();
     if (teams.nodes.length > 0) {
       return teams.nodes[0].id;
     }
@@ -329,8 +376,13 @@ async function resolveTeamId(
   throw new Error("Unable to resolve teamId for creating issues.");
 }
 
-function withManagedMetadata(description: string): string {
-  return `${description.trim()}\n\n${MANAGED_METADATA}`;
+function ensureManagedMetadata(description: string): string {
+  const stripped = stripManagedMetadata(description);
+  if (!stripped) {
+    return MANAGED_METADATA_LINE;
+  }
+
+  return `${MANAGED_METADATA_LINE}\n\n${stripped}`;
 }
 
 function stripManagedMetadata(description: string | null | undefined): string {
@@ -338,13 +390,23 @@ function stripManagedMetadata(description: string | null | undefined): string {
     return "";
   }
 
-  return description.replace(/\n?\n?---\nmanagedBy: linear-engine\n---\s*$/u, "").trim();
+  return description
+    .replace(/\s*^---\s*\nmanagedBy:\s*linear-engine\s*\n---\s*\n?/imu, "")
+    .replace(/\s*\n?---\s*\nmanagedBy:\s*linear-engine\s*\n---\s*$/imu, "")
+    .replace(/^managedBy:\s*linear-engine\s*\n*/imu, "")
+    .trim();
 }
 
-function isManaged(description: string | null | undefined): boolean {
-  if (!description) {
-    return false;
-  }
+function normalizeDescription(description: string | null | undefined): string {
+  return ensureManagedMetadata(stripManagedMetadata(description)).trim();
+}
 
-  return description.includes(MANAGED_METADATA);
+function pushAction(
+  report: SyncReport,
+  status: SyncStatus,
+  entity: SyncEntity,
+  name: string,
+  reason?: string
+): void {
+  report.actions.push({ status, entity, name, reason });
 }

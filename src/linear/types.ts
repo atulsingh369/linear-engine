@@ -1,11 +1,13 @@
 export interface StorySpec {
   title: string;
   description: string;
+  assignee?: string;
 }
 
 export interface EpicSpec {
   title: string;
   description: string;
+  assignee?: string;
   stories?: StorySpec[];
 }
 

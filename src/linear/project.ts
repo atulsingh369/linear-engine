@@ -2,7 +2,6 @@ import { createLinearApiClient, LinearApiClient } from "./client";
 
 type ProjectLike = {
   id: string;
-  name: string;
 };
 
 type IssueLike = {
@@ -15,6 +14,7 @@ type IssueLike = {
 
 export interface AssignProjectIssuesInput {
   projectName: string;
+  force?: boolean;
 }
 
 export interface AssignProjectIssuesResult {
@@ -39,17 +39,21 @@ export async function assignProjectIssues(
 
   const currentUser = await client.getCurrentUser();
   const issues = (await client.getIssuesByProject(project.id)) as IssueLike[];
+  const force = input.force ?? false;
 
   let assignedCount = 0;
   let skippedCount = 0;
 
   for (const issue of issues) {
-    if (getIssueAssigneeId(issue) === null) {
-      await client.updateIssue(issue.id, { assigneeId: currentUser.id });
-      assignedCount += 1;
-    } else {
+    const hasAssignee = getIssueAssigneeId(issue) !== null;
+
+    if (!force && hasAssignee) {
       skippedCount += 1;
+      continue;
     }
+
+    await client.updateIssue(issue.id, { assigneeId: currentUser.id });
+    assignedCount += 1;
   }
 
   return {
