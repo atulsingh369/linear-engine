@@ -1,4 +1,4 @@
-# CHANGELOG
+# LINEAR ENGINE CLI DOCS
 
 ## linear-engine CLI Updates
 
@@ -21,7 +21,6 @@
 
 - `linear move --id <issue-key> --state "<state name>"`
   - Supports key-based move with state lookup by name (case-insensitive).
-  - Also continues to support `--issue "<title>"`.
 - `linear sync --file <path>`
   - Supports optional assignee rules on epics/stories via `assignee` field.
   - Supports optional milestone mapping on epics/stories via `milestone` field.
