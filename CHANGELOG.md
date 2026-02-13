@@ -12,6 +12,10 @@
   - Assigns a specific user to an issue.
 - `linear start --id <issue-key>`
   - Moves an issue to the first active workflow state.
+- `linear list --project "<project-name>" [--json]`
+  - Lists project issues with deterministic `createdAt` ascending order.
+  - Includes: `id`, `identifier`, `title`, `state.name`, `projectMilestoneId`, `createdAt`, `parentId`, `assignee.displayName`.
+  - Default output is a readable table; `--json` returns a structured JSON array.
 
 ### Enhanced Commands
 
@@ -46,6 +50,8 @@
 - `linear comment --id COG-12 --text "Deployed to staging"`
 - `linear assign --id COG-12 --user atul`
 - `linear start --id COG-12`
+- `linear list --project "Core Platform"`
+- `linear list --project "Core Platform" --json`
 - `linear assign-project --project "Core Platform"`
 - `linear assign-project --project "Core Platform" --force`
 - `linear sync --file ./specs/project.json --json`

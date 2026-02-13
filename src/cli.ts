@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import yargs from "yargs";
 import { assignIssueToUser, addCommentToIssue, getIssueStatusByKey, moveIssueByKeyToState, moveIssueToState, startIssueByKey } from "./linear/issue";
-import { assignProjectIssues } from "./linear/project";
+import { assignProjectIssues, listProjectIssues, ListedProjectIssue } from "./linear/project";
 import { syncProject, SyncAction, SyncStatus } from "./linear/sync";
 import { EpicSpec, ProjectSpec, StorySpec } from "./linear/types";
 import { createLogger, Logger } from "./utils/logger";
@@ -18,6 +18,10 @@ interface SyncCommandArgs extends GlobalArgs {
 interface AssignProjectCommandArgs extends GlobalArgs {
   project: string;
   force?: boolean;
+}
+
+interface ListProjectCommandArgs extends GlobalArgs {
+  project: string;
 }
 
 interface MoveCommandArgs extends GlobalArgs {
@@ -92,6 +96,25 @@ export async function runCli(argv: string[]): Promise<void> {
             {
               project: String(args.project),
               force: Boolean(args.force),
+              json: Boolean(args.json)
+            },
+            logger
+          );
+        }
+      )
+      .command(
+        "list",
+        "List issues for a project",
+        (cmd) =>
+          cmd.option("project", {
+            type: "string",
+            demandOption: true,
+            description: "Project name"
+          }),
+        async (args) => {
+          await handleListProjectCommand(
+            {
+              project: String(args.project),
               json: Boolean(args.json)
             },
             logger
@@ -247,6 +270,26 @@ async function handleStatusCommand(args: StatusCommandArgs, logger: Logger): Pro
         `Project: ${status.project}`
       ]
     );
+  } catch (error) {
+    printError(error, args.json ?? false, logger);
+  }
+}
+
+async function handleListProjectCommand(
+  args: ListProjectCommandArgs,
+  logger: Logger
+): Promise<void> {
+  try {
+    const issues = await listProjectIssues({ projectName: args.project });
+    if (args.json) {
+      printOutput(issues, true, logger, []);
+      return;
+    }
+
+    const lines = renderIssueTable(issues);
+    for (const line of lines) {
+      logger.info(line);
+    }
   } catch (error) {
     printError(error, args.json ?? false, logger);
   }
@@ -455,6 +498,46 @@ function printActionsByStatus(status: SyncStatus, actions: SyncAction[], logger:
     const reasonSuffix = action.reason ? ` (${action.reason})` : "";
     logger.info(`- ${action.entity}: ${action.name}${reasonSuffix}`);
   }
+}
+
+function renderIssueTable(issues: ListedProjectIssue[]): string[] {
+  const columns = [
+    "id",
+    "identifier",
+    "title",
+    "state.name",
+    "projectMilestoneId",
+    "createdAt",
+    "parentId",
+    "assignee.displayName"
+  ] as const;
+
+  const rows = issues.map((issue) => [
+    issue.id,
+    issue.identifier ?? "",
+    issue.title,
+    issue.state.name ?? "",
+    issue.projectMilestoneId ?? "",
+    issue.createdAt,
+    issue.parentId ?? "",
+    issue.assignee.displayName ?? ""
+  ]);
+
+  const widths = columns.map((column, columnIndex) => {
+    const cellWidths = rows.map((row) => row[columnIndex].length);
+    return Math.max(column.length, ...cellWidths, 1);
+  });
+
+  const formatRow = (cells: string[]): string =>
+    cells
+      .map((cell, index) => cell.padEnd(widths[index], " "))
+      .join("  ");
+
+  const header = formatRow([...columns]);
+  const divider = widths.map((width) => "-".repeat(width)).join("  ");
+  const data = rows.map((row) => formatRow(row));
+
+  return [header, divider, ...data];
 }
 
 function isProjectSpec(value: unknown): value is ProjectSpec {

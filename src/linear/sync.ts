@@ -60,7 +60,7 @@ export async function runLinearSync(_options: SyncOptions = {}): Promise<void> {
 
 export async function syncProject(
   spec: ProjectSpec,
-  client: LinearApiClient = createLinearApiClient()
+  client: LinearApiClient = createLinearApiClient(),
 ): Promise<SyncReport> {
   const report: SyncReport = { actions: [] };
 
@@ -74,7 +74,7 @@ export async function syncProject(
 async function ensureProject(
   client: LinearApiClient,
   spec: ProjectSpec,
-  report: SyncReport
+  report: SyncReport,
 ): Promise<ProjectLike> {
   const projectName = spec.project.name.trim();
   if (!projectName) {
@@ -82,12 +82,22 @@ async function ensureProject(
   }
 
   const desiredDescription = spec.project.description ?? "";
-  const existingProject = (await client.getProjectByName(projectName)) as ProjectLike | null;
+  const existingProject = (await client.getProjectByName(
+    projectName,
+  )) as ProjectLike | null;
 
   if (!existingProject) {
+    const teams = await client.getTeams();
+    if (teams.length === 0) {
+      throw new Error(
+        "No teams available. At least one team is required to create a project.",
+      );
+    }
+
     const createResult = await client.createProject({
       name: projectName,
-      description: desiredDescription
+      description: desiredDescription,
+      teamIds: [teams[0].id],
     });
     const createdProject = (createResult as { project?: ProjectLike }).project;
     if (!createdProject) {
@@ -101,11 +111,17 @@ async function ensureProject(
   const currentDescription = existingProject.description ?? "";
   if (currentDescription !== desiredDescription) {
     await client.updateProject(existingProject.id, {
-      description: desiredDescription
+      description: desiredDescription,
     });
     pushAction(report, "Updated", "project", projectName);
   } else {
-    pushAction(report, "Skipped", "project", projectName, "description unchanged");
+    pushAction(
+      report,
+      "Skipped",
+      "project",
+      projectName,
+      "description unchanged",
+    );
   }
 
   return existingProject;
@@ -115,21 +131,26 @@ async function ensureMilestones(
   client: LinearApiClient,
   project: ProjectLike,
   spec: ProjectSpec,
-  report: SyncReport
+  report: SyncReport,
 ): Promise<void> {
   const desiredMilestoneNames = collectDesiredMilestoneNames(spec);
   if (desiredMilestoneNames.size === 0) {
     return;
   }
 
-  const existingMilestones = await getProjectMilestones(project, desiredMilestoneNames.size > 0);
-  const existingNames = new Set(existingMilestones.map((milestone) => milestone.name));
+  const existingMilestones = await getProjectMilestones(
+    project,
+    desiredMilestoneNames.size > 0,
+  );
+  const existingNames = new Set(
+    existingMilestones.map((milestone) => milestone.name),
+  );
 
   for (const milestoneName of desiredMilestoneNames) {
     if (!existingNames.has(milestoneName)) {
       await client.createMilestone({
         projectId: project.id,
-        name: milestoneName
+        name: milestoneName,
       });
       pushAction(report, "Created", "milestone", milestoneName);
       continue;
@@ -138,11 +159,18 @@ async function ensureMilestones(
     pushAction(report, "Skipped", "milestone", milestoneName, "already exists");
   }
 
-  const resolvedMilestones = await getProjectMilestones(project, desiredMilestoneNames.size > 0);
-  const resolvedMilestoneNames = new Set(resolvedMilestones.map((milestone) => milestone.name));
+  const resolvedMilestones = await getProjectMilestones(
+    project,
+    desiredMilestoneNames.size > 0,
+  );
+  const resolvedMilestoneNames = new Set(
+    resolvedMilestones.map((milestone) => milestone.name),
+  );
   for (const milestoneName of desiredMilestoneNames) {
     if (!resolvedMilestoneNames.has(milestoneName)) {
-      throw new Error(`Milestone exists in spec but could not be resolved: ${milestoneName}`);
+      throw new Error(
+        `Milestone exists in spec but could not be resolved: ${milestoneName}`,
+      );
     }
   }
 }
@@ -151,7 +179,7 @@ async function ensureEpicsAndStories(
   client: LinearApiClient,
   project: ProjectLike,
   spec: ProjectSpec,
-  report: SyncReport
+  report: SyncReport,
 ): Promise<void> {
   const desiredEpics = spec.epics ?? [];
   if (desiredEpics.length === 0) {
@@ -166,7 +194,7 @@ async function ensureEpicsAndStories(
     const desiredEpicAssigneeId = await resolveDesiredAssigneeId(
       client,
       epicSpec.assignee,
-      currentUser.id
+      currentUser.id,
     );
 
     const epicMilestoneName = resolveEpicMilestoneName(spec, epicSpec);
@@ -179,7 +207,7 @@ async function ensureEpicsAndStories(
         projectId: project.id,
         title: epicSpec.title,
         description: ensureManagedMetadata(epicSpec.description),
-        assigneeId: desiredEpicAssigneeId
+        assigneeId: desiredEpicAssigneeId,
       });
       epicIssue = (createdEpic as { issue?: IssueLike }).issue ?? null;
       if (!epicIssue) {
@@ -196,18 +224,35 @@ async function ensureEpicsAndStories(
         Boolean(epicSpec.assignee),
         report,
         "epic",
-        epicSpec.title
+        epicSpec.title,
       );
 
-      const desiredEpicDescription = ensureManagedMetadata(epicSpec.description);
-      if (normalizeDescription(epicIssue.description) !== normalizeDescription(desiredEpicDescription)) {
+      const desiredEpicDescription = ensureManagedMetadata(
+        epicSpec.description,
+      );
+      if (
+        normalizeDescription(epicIssue.description) !==
+        normalizeDescription(desiredEpicDescription)
+      ) {
         await client.updateIssue(epicIssue.id, {
-          description: desiredEpicDescription
+          description: desiredEpicDescription,
         });
         epicIssue.description = desiredEpicDescription;
-        pushAction(report, "Updated", "epic", epicSpec.title, "description synchronized");
+        pushAction(
+          report,
+          "Updated",
+          "epic",
+          epicSpec.title,
+          "description synchronized",
+        );
       } else {
-        pushAction(report, "Skipped", "epic", epicSpec.title, "description unchanged");
+        pushAction(
+          report,
+          "Skipped",
+          "epic",
+          epicSpec.title,
+          "description unchanged",
+        );
       }
     }
 
@@ -216,28 +261,37 @@ async function ensureEpicsAndStories(
         client,
         epicIssue.id,
         project.id,
-        epicMilestoneName
+        epicMilestoneName,
       );
       if (assigned) {
-        pushAction(report, "Updated", "epic", epicSpec.title, "milestone assigned");
+        pushAction(
+          report,
+          "Updated",
+          "epic",
+          epicSpec.title,
+          "milestone assigned",
+        );
         pushAction(
           report,
           "Updated",
           "milestone-assignment",
           epicSpec.title,
-          `milestone assigned: ${epicMilestoneName}`
+          `milestone assigned: ${epicMilestoneName}`,
         );
       }
     }
 
     const desiredStories = epicSpec.stories ?? [];
     for (const storySpec of desiredStories) {
-      const storyMilestoneName = resolveStoryMilestoneName(epicSpec.milestone, storySpec.milestone);
+      const storyMilestoneName = resolveStoryMilestoneName(
+        epicSpec.milestone,
+        storySpec.milestone,
+      );
 
       const desiredStoryAssigneeId = await resolveDesiredAssigneeId(
         client,
         storySpec.assignee,
-        currentUser.id
+        currentUser.id,
       );
 
       let storyIssue = findIssueByTitle(issues, storySpec.title, epicIssue.id);
@@ -249,7 +303,7 @@ async function ensureEpicsAndStories(
           parentId: epicIssue.id,
           title: storySpec.title,
           description: ensureManagedMetadata(storySpec.description),
-          assigneeId: desiredStoryAssigneeId
+          assigneeId: desiredStoryAssigneeId,
         });
         storyIssue = (createdStory as { issue?: IssueLike }).issue ?? null;
         if (!storyIssue) {
@@ -266,21 +320,35 @@ async function ensureEpicsAndStories(
           Boolean(storySpec.assignee),
           report,
           "story",
-          storySpec.title
+          storySpec.title,
         );
 
-        const desiredStoryDescription = ensureManagedMetadata(storySpec.description);
+        const desiredStoryDescription = ensureManagedMetadata(
+          storySpec.description,
+        );
         if (
           normalizeDescription(storyIssue.description) !==
           normalizeDescription(desiredStoryDescription)
         ) {
           await client.updateIssue(storyIssue.id, {
-            description: desiredStoryDescription
+            description: desiredStoryDescription,
           });
           storyIssue.description = desiredStoryDescription;
-          pushAction(report, "Updated", "story", storySpec.title, "description synchronized");
+          pushAction(
+            report,
+            "Updated",
+            "story",
+            storySpec.title,
+            "description synchronized",
+          );
         } else {
-          pushAction(report, "Skipped", "story", storySpec.title, "description unchanged");
+          pushAction(
+            report,
+            "Skipped",
+            "story",
+            storySpec.title,
+            "description unchanged",
+          );
         }
       }
 
@@ -289,16 +357,22 @@ async function ensureEpicsAndStories(
           client,
           storyIssue.id,
           project.id,
-          storyMilestoneName
+          storyMilestoneName,
         );
         if (assigned) {
-          pushAction(report, "Updated", "story", storySpec.title, "milestone assigned");
+          pushAction(
+            report,
+            "Updated",
+            "story",
+            storySpec.title,
+            "milestone assigned",
+          );
           pushAction(
             report,
             "Updated",
             "milestone-assignment",
             storySpec.title,
-            `milestone assigned: ${storyMilestoneName}`
+            `milestone assigned: ${storyMilestoneName}`,
           );
         }
       }
@@ -313,7 +387,7 @@ async function syncIssueAssignee(
   explicitAssigneeInSpec: boolean,
   report: SyncReport,
   entity: SyncEntity,
-  name: string
+  name: string,
 ): Promise<void> {
   const currentAssigneeId = getIssueAssigneeId(issue);
 
@@ -329,14 +403,20 @@ async function syncIssueAssignee(
   if (currentAssigneeId === null) {
     await client.updateIssue(issue.id, { assigneeId: desiredAssigneeId });
     issue.assigneeId = desiredAssigneeId;
-    pushAction(report, "Updated", entity, name, "Assigned issue to current user");
+    pushAction(
+      report,
+      "Updated",
+      entity,
+      name,
+      "Assigned issue to current user",
+    );
   }
 }
 
 async function resolveDesiredAssigneeId(
   client: LinearApiClient,
   assigneeReference: string | undefined,
-  defaultAssigneeId: string
+  defaultAssigneeId: string,
 ): Promise<string> {
   if (!assigneeReference) {
     return defaultAssigneeId;
@@ -360,14 +440,19 @@ async function resolveDesiredAssigneeId(
     }
 
     throw new Error(
-      `Assignee reference ${normalizedReference} points to an issue without an assignee.`
+      `Assignee reference ${normalizedReference} points to an issue without an assignee.`,
     );
   }
 
-  throw new Error(`Unable to resolve assignee reference: ${normalizedReference}`);
+  throw new Error(
+    `Unable to resolve assignee reference: ${normalizedReference}`,
+  );
 }
 
-function getIssueAssigneeId(issue: { assigneeId?: string | null; assignee?: { id: string } | null }): string | null {
+function getIssueAssigneeId(issue: {
+  assigneeId?: string | null;
+  assignee?: { id: string } | null;
+}): string | null {
   if (issue.assigneeId) {
     return issue.assigneeId;
   }
@@ -378,11 +463,12 @@ function getIssueAssigneeId(issue: { assigneeId?: string | null; assignee?: { id
 function findIssueByTitle(
   issues: IssueLike[],
   title: string,
-  parentId: string | null
+  parentId: string | null,
 ): IssueLike | null {
   return (
     issues.find(
-      (issue) => issue.title === title && normalizeParentId(issue.parentId) === parentId
+      (issue) =>
+        issue.title === title && normalizeParentId(issue.parentId) === parentId,
     ) ?? null
   );
 }
@@ -393,7 +479,7 @@ function normalizeParentId(parentId: string | null | undefined): string | null {
 
 async function getProjectMilestones(
   project: ProjectLike,
-  required: boolean
+  required: boolean,
 ): Promise<MilestoneLike[]> {
   if (typeof project.projectMilestones !== "function") {
     if (required) {
@@ -410,7 +496,7 @@ async function getProjectMilestones(
 async function resolveTeamId(
   client: LinearApiClient,
   project: ProjectLike,
-  issues: IssueLike[]
+  issues: IssueLike[],
 ): Promise<string> {
   if (project.teamId) {
     return project.teamId;
@@ -465,7 +551,10 @@ function collectDesiredMilestoneNames(spec: ProjectSpec): Set<string> {
     }
 
     for (const story of epic.stories ?? []) {
-      const storyMilestoneName = resolveStoryMilestoneName(epic.milestone, story.milestone);
+      const storyMilestoneName = resolveStoryMilestoneName(
+        epic.milestone,
+        story.milestone,
+      );
       if (storyMilestoneName) {
         names.add(storyMilestoneName);
       }
@@ -475,14 +564,17 @@ function collectDesiredMilestoneNames(spec: ProjectSpec): Set<string> {
   return names;
 }
 
-function resolveEpicMilestoneName(spec: ProjectSpec, epic: EpicSpec): string | undefined {
+function resolveEpicMilestoneName(
+  spec: ProjectSpec,
+  epic: EpicSpec,
+): string | undefined {
   const explicitName = epic.milestone?.trim();
   if (explicitName) {
     return explicitName;
   }
 
   const matchingTopLevel = spec.milestones?.find(
-    (milestone) => milestone.name.trim() === epic.title.trim()
+    (milestone) => milestone.name.trim() === epic.title.trim(),
   );
   if (matchingTopLevel?.name.trim()) {
     return matchingTopLevel.name.trim();
@@ -493,7 +585,7 @@ function resolveEpicMilestoneName(spec: ProjectSpec, epic: EpicSpec): string | u
 
 function resolveStoryMilestoneName(
   epicMilestone: string | undefined,
-  storyMilestone: string | undefined
+  storyMilestone: string | undefined,
 ): string | undefined {
   const explicitStory = storyMilestone?.trim();
   if (explicitStory) {
@@ -512,15 +604,19 @@ async function attachIssueToMilestone(
   client: LinearApiClient,
   issueId: string,
   projectId: string,
-  milestoneName: string
+  milestoneName: string,
 ): Promise<boolean> {
   const normalizedName = milestoneName.trim();
   if (!normalizedName) {
     return false;
   }
 
-  const project = (await client.getProjects()).find((candidate) => candidate.id === projectId) as
-    | (ProjectLike & { projectMilestones?: () => Promise<{ nodes: MilestoneLike[] }> })
+  const project = (await client.getProjects()).find(
+    (candidate) => candidate.id === projectId,
+  ) as
+    | (ProjectLike & {
+        projectMilestones?: () => Promise<{ nodes: MilestoneLike[] }>;
+      })
     | undefined;
   if (!project || typeof project.projectMilestones !== "function") {
     return false;
@@ -528,7 +624,7 @@ async function attachIssueToMilestone(
 
   const milestoneResult = await project.projectMilestones();
   const foundMilestone = milestoneResult.nodes.find(
-    (milestone) => milestone.name === normalizedName
+    (milestone) => milestone.name === normalizedName,
   );
   if (!foundMilestone) {
     return false;
@@ -559,7 +655,7 @@ function pushAction(
   status: SyncStatus,
   entity: SyncEntity,
   name: string,
-  reason?: string
+  reason?: string,
 ): void {
   report.actions.push({ status, entity, name, reason });
 }
