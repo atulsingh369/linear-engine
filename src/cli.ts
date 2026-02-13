@@ -1,10 +1,16 @@
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
 import yargs from "yargs";
-import { assignIssueToUser, addCommentToIssue, getIssueStatusByKey, moveIssueByKeyToState, moveIssueToState, startIssueByKey } from "./linear/issue";
-import { assignProjectIssues, listProjectIssues, ListedProjectIssue } from "./linear/project";
-import { syncProject, SyncAction, SyncStatus } from "./linear/sync";
-import { EpicSpec, ProjectSpec, StorySpec } from "./linear/types";
+import {
+  assignIssue,
+  assignProject,
+  commentIssue,
+  getIssueStatus,
+  listProjectIssues,
+  moveIssue,
+  startIssue,
+  syncSpec
+} from "./core";
+import { SyncAction, SyncStatus } from "./linear/sync";
+import { ListedProjectIssue } from "./linear/project";
 import { createLogger, Logger } from "./utils/logger";
 
 interface GlobalArgs {
@@ -25,8 +31,7 @@ interface ListProjectCommandArgs extends GlobalArgs {
 }
 
 interface MoveCommandArgs extends GlobalArgs {
-  issue?: string;
-  id?: string;
+  id: string;
   state: string;
 }
 
@@ -144,13 +149,8 @@ export async function runCli(argv: string[]): Promise<void> {
           cmd
             .option("id", {
               type: "string",
-              demandOption: false,
+              demandOption: true,
               description: "Issue key (e.g. COG-12)"
-            })
-            .option("issue", {
-              type: "string",
-              demandOption: false,
-              description: "Exact issue title"
             })
             .option("state", {
               type: "string",
@@ -160,8 +160,7 @@ export async function runCli(argv: string[]): Promise<void> {
         async (args) => {
           await handleMoveCommand(
             {
-              id: args.id ? String(args.id) : undefined,
-              issue: args.issue ? String(args.issue) : undefined,
+              id: String(args.id),
               state: String(args.state),
               json: Boolean(args.json)
             },
@@ -251,7 +250,7 @@ export async function runCli(argv: string[]): Promise<void> {
 
 async function handleStatusCommand(args: StatusCommandArgs, logger: Logger): Promise<void> {
   try {
-    const status = await getIssueStatusByKey(args.id);
+    const status = await getIssueStatus(args.id);
     printOutput(
       {
         issueKey: status.issueKey,
@@ -280,7 +279,7 @@ async function handleListProjectCommand(
   logger: Logger
 ): Promise<void> {
   try {
-    const issues = await listProjectIssues({ projectName: args.project });
+    const issues = await listProjectIssues(args.project);
     if (args.json) {
       printOutput(issues, true, logger, []);
       return;
@@ -297,22 +296,7 @@ async function handleListProjectCommand(
 
 async function handleMoveCommand(args: MoveCommandArgs, logger: Logger): Promise<void> {
   try {
-    const hasIssue = Boolean(args.issue);
-    const hasId = Boolean(args.id);
-
-    if (hasIssue === hasId) {
-      throw new Error('Provide exactly one of "--id" or "--issue".');
-    }
-
-    const result = hasId
-      ? await moveIssueByKeyToState({
-          issueKey: args.id as string,
-          stateName: args.state
-        })
-      : await moveIssueToState({
-          title: args.issue as string,
-          stateName: args.state
-        });
+    const result = await moveIssue(args.id, args.state);
 
     printOutput(
       {
@@ -331,10 +315,7 @@ async function handleMoveCommand(args: MoveCommandArgs, logger: Logger): Promise
 
 async function handleCommentCommand(args: CommentCommandArgs, logger: Logger): Promise<void> {
   try {
-    const result = await addCommentToIssue({
-      issueKey: args.id,
-      text: args.text
-    });
+    const result = await commentIssue(args.id, args.text);
 
     printOutput(
       {
@@ -352,10 +333,7 @@ async function handleCommentCommand(args: CommentCommandArgs, logger: Logger): P
 
 async function handleAssignCommand(args: AssignCommandArgs, logger: Logger): Promise<void> {
   try {
-    const result = await assignIssueToUser({
-      issueKey: args.id,
-      userIdentifier: args.user
-    });
+    const result = await assignIssue(args.id, args.user);
 
     printOutput(
       {
@@ -374,7 +352,7 @@ async function handleAssignCommand(args: AssignCommandArgs, logger: Logger): Pro
 
 async function handleStartCommand(args: StartCommandArgs, logger: Logger): Promise<void> {
   try {
-    const result = await startIssueByKey(args.id);
+    const result = await startIssue(args.id);
 
     printOutput(
       {
@@ -396,10 +374,7 @@ async function handleAssignProjectCommand(
   logger: Logger
 ): Promise<void> {
   try {
-    const result = await assignProjectIssues({
-      projectName: args.project,
-      force: args.force ?? false
-    });
+    const result = await assignProject(args.project, args.force ?? false);
 
     printOutput(
       {
@@ -423,8 +398,7 @@ async function handleAssignProjectCommand(
 
 async function handleSyncCommand(args: SyncCommandArgs, logger: Logger): Promise<void> {
   try {
-    const spec = await loadProjectSpecFromFile(args.file);
-    const report = await syncProject(spec);
+    const report = await syncSpec(args.file);
 
     if (args.json) {
       printOutput(report, true, logger, []);
@@ -437,34 +411,6 @@ async function handleSyncCommand(args: SyncCommandArgs, logger: Logger): Promise
   } catch (error) {
     printError(error, args.json ?? false, logger);
   }
-}
-
-async function loadProjectSpecFromFile(filePath: string): Promise<ProjectSpec> {
-  const absolutePath = resolve(process.cwd(), filePath);
-
-  let raw: string;
-  try {
-    raw = await readFile(absolutePath, "utf8");
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown read error";
-    throw new Error(`Failed to read spec file at ${absolutePath}: ${message}`);
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Invalid JSON";
-    throw new Error(`Invalid JSON in ${absolutePath}: ${message}`);
-  }
-
-  if (!isProjectSpec(parsed)) {
-    throw new Error(
-      `Invalid ProjectSpec in ${absolutePath}. Expected shape: { project: { name, description }, milestones?, epics? }.`
-    );
-  }
-
-  return parsed;
 }
 
 function printOutput(payload: unknown, json: boolean, logger: Logger, lines: string[]): void {
@@ -538,105 +484,4 @@ function renderIssueTable(issues: ListedProjectIssue[]): string[] {
   const data = rows.map((row) => formatRow(row));
 
   return [header, divider, ...data];
-}
-
-function isProjectSpec(value: unknown): value is ProjectSpec {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  if (!isRecord(value.project)) {
-    return false;
-  }
-
-  if (!isNonEmptyString(value.project.name) || !isString(value.project.description)) {
-    return false;
-  }
-
-  if (value.milestones !== undefined) {
-    if (!Array.isArray(value.milestones)) {
-      return false;
-    }
-
-    const milestonesAreValid = value.milestones.every(
-      (milestone) => isRecord(milestone) && isNonEmptyString(milestone.name)
-    );
-    if (!milestonesAreValid) {
-      return false;
-    }
-  }
-
-  if (value.epics !== undefined) {
-    if (!Array.isArray(value.epics)) {
-      return false;
-    }
-
-    const epicsAreValid = value.epics.every((epic) => isEpicSpec(epic));
-    if (!epicsAreValid) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function isEpicSpec(value: unknown): value is EpicSpec {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  if (!isNonEmptyString(value.title) || !isString(value.description)) {
-    return false;
-  }
-
-  if (value.assignee !== undefined && !isString(value.assignee)) {
-    return false;
-  }
-  if (value.milestone !== undefined && !isString(value.milestone)) {
-    return false;
-  }
-
-  if (value.stories !== undefined) {
-    if (!Array.isArray(value.stories)) {
-      return false;
-    }
-
-    const storiesAreValid = value.stories.every((story) => isStorySpec(story));
-    if (!storiesAreValid) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function isStorySpec(value: unknown): value is StorySpec {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  if (!isNonEmptyString(value.title) || !isString(value.description)) {
-    return false;
-  }
-
-  if (value.assignee !== undefined && !isString(value.assignee)) {
-    return false;
-  }
-  if (value.milestone !== undefined && !isString(value.milestone)) {
-    return false;
-  }
-
-  return true;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isString(value: unknown): value is string {
-  return typeof value === "string";
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return isString(value) && value.trim().length > 0;
 }

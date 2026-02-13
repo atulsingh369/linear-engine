@@ -12,11 +12,16 @@
   "scripts": {
     "build": "tsup",
     "clean": "rm -rf dist",
+    "start:api": "node dist/api/server.js",
+    "dev:api": "tsup --watch --onSuccess \"node dist/api/server.js\"",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@hono/node-server": "^1.13.8",
     "@linear/sdk": "^40.0.0",
+    "dotenv": "^16.4.7",
+    "hono": "^4.6.10",
     "yargs": "^18.0.0"
   },
   "devDependencies": {
