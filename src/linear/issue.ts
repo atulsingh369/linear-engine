@@ -79,13 +79,14 @@ export async function getIssueStatusByKey(
 
   const states = await client.getWorkflowStatesByTeam(issue.teamId);
   const projects = (await client.getProjects()) as ProjectLike[];
+  const users = await client.getUsers();
   const projectName = resolveProjectName(issue, projects);
 
   return {
     issueKey: issue.identifier ?? issueKey,
     title: issue.title,
     state: getStateNameById(states, issue.stateId),
-    assignee: resolveAssigneeLabel(issue),
+    assignee: resolveAssigneeLabel(issue, users),
     project: projectName
   };
 }
@@ -256,27 +257,21 @@ function resolveProjectName(issue: IssueLike, projects: ProjectLike[]): string {
   return "Unknown";
 }
 
-function resolveAssigneeLabel(issue: IssueLike): string {
-  if (!issue.assignee) {
+function resolveAssigneeLabel(
+  issue: IssueLike,
+  users: Array<{ id: string; displayName?: string | null; name?: string | null; email?: string | null }>
+): string {
+  const assigneeId = issue.assigneeId ?? issue.assignee?.id ?? null;
+  if (!assigneeId) {
     return "Unassigned";
   }
 
-  const displayName = issue.assignee.displayName?.trim();
-  if (displayName) {
-    return displayName;
+  const user = users.find((candidate) => candidate.id === assigneeId);
+  if (!user) {
+    return assigneeId;
   }
 
-  const name = issue.assignee.name?.trim();
-  if (name) {
-    return name;
-  }
-
-  const email = issue.assignee.email?.trim();
-  if (email) {
-    return email;
-  }
-
-  return issue.assignee.id;
+  return resolveUserLabel(user);
 }
 
 function resolveUserLabel(user: { id: string; displayName?: string | null; name?: string | null; email?: string | null }): string {

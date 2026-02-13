@@ -11,6 +11,10 @@ type CreateProjectInput = Parameters<SDKClient["createProject"]>[0];
 type UpdateProjectInput = Parameters<SDKClient["updateProject"]>[1];
 type UpdateProjectIdentifier = Parameters<SDKClient["updateProject"]>[0];
 type CreateIssueInput = Parameters<SDKClient["createIssue"]>[0];
+interface IssueInputWithAssignee {
+  assigneeId?: string;
+  [key: string]: unknown;
+}
 type UpdateIssueInput = Parameters<SDKClient["updateIssue"]>[1];
 type UpdateIssueIdentifier = Parameters<SDKClient["updateIssue"]>[0];
 type CreateCommentInput = Parameters<SDKClient["createComment"]>[0];
@@ -32,7 +36,9 @@ interface ProjectMilestoneMutation {
 }
 
 interface LinearClientWithMilestone {
-  createProjectMilestone?: (input: CreateMilestoneInput) => Promise<ProjectMilestoneMutation>;
+  createProjectMilestone?: (
+    input: CreateMilestoneInput,
+  ) => Promise<ProjectMilestoneMutation>;
 }
 
 interface TeamWithStates {
@@ -77,7 +83,7 @@ export class LinearApiClient {
     if (!apiKey) {
       throw new LinearApiClientError(
         "initialize-client",
-        "LINEAR_API_KEY is missing. Set LINEAR_API_KEY or pass apiKey in config."
+        "LINEAR_API_KEY is missing. Set LINEAR_API_KEY or pass apiKey in config.",
       );
     }
 
@@ -116,7 +122,7 @@ export class LinearApiClient {
       if (!needle) {
         throw new LinearApiClientError(
           "find-user-by-identifier",
-          "User identifier is required and cannot be empty."
+          "User identifier is required and cannot be empty.",
         );
       }
 
@@ -130,7 +136,8 @@ export class LinearApiClient {
       return (
         users.find((user) => {
           const name = (user as { name?: string | null }).name ?? "";
-          const displayName = (user as { displayName?: string | null }).displayName ?? "";
+          const displayName =
+            (user as { displayName?: string | null }).displayName ?? "";
           const email = (user as { email?: string | null }).email ?? "";
 
           return (
@@ -156,14 +163,15 @@ export class LinearApiClient {
       if (!normalizedName) {
         throw new LinearApiClientError(
           "get-project-by-name",
-          "Project name is required and cannot be empty."
+          "Project name is required and cannot be empty.",
         );
       }
 
       const projects = await this.getProjects();
       return (
         projects.find(
-          (project) => project.name.toLowerCase() === normalizedName.toLowerCase()
+          (project) =>
+            project.name.toLowerCase() === normalizedName.toLowerCase(),
         ) ?? null
       );
     });
@@ -175,7 +183,7 @@ export class LinearApiClient {
       if (!normalizedProjectId) {
         throw new LinearApiClientError(
           "get-issues-by-project",
-          "Project ID is required and cannot be empty."
+          "Project ID is required and cannot be empty.",
         );
       }
 
@@ -183,10 +191,10 @@ export class LinearApiClient {
         filter: {
           project: {
             id: {
-              eq: normalizedProjectId
-            }
-          }
-        }
+              eq: normalizedProjectId,
+            },
+          },
+        },
       });
 
       return result.nodes;
@@ -199,16 +207,16 @@ export class LinearApiClient {
       if (!normalizedTitle) {
         throw new LinearApiClientError(
           "get-issues-by-title",
-          "Issue title is required and cannot be empty."
+          "Issue title is required and cannot be empty.",
         );
       }
 
       const result = await this.client.issues({
         filter: {
           title: {
-            eq: normalizedTitle
-          }
-        }
+            eq: normalizedTitle,
+          },
+        },
       });
 
       return result.nodes;
@@ -221,19 +229,21 @@ export class LinearApiClient {
       if (!normalizedKey) {
         throw new LinearApiClientError(
           "get-issue-by-key",
-          "Issue key is required and cannot be empty."
+          "Issue key is required and cannot be empty.",
         );
       }
 
-      const result = await this.client.issues({
-        filter: {
-          identifier: {
-            eq: normalizedKey
-          }
+      try {
+        const issue = await this.client.issue(normalizedKey);
+        return issue ?? null;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        if (/not found/i.test(message)) {
+          return null;
         }
-      });
 
-      return result.nodes[0] ?? null;
+        throw error;
+      }
     });
   }
 
@@ -243,7 +253,7 @@ export class LinearApiClient {
       if (!normalizedTeamId) {
         throw new LinearApiClientError(
           "get-workflow-states-by-team",
-          "Team ID is required and cannot be empty."
+          "Team ID is required and cannot be empty.",
         );
       }
 
@@ -251,7 +261,7 @@ export class LinearApiClient {
       if (!teamGetter) {
         throw new LinearApiClientError(
           "get-workflow-states-by-team",
-          "Current @linear/sdk version does not expose team lookup."
+          "Current @linear/sdk version does not expose team lookup.",
         );
       }
 
@@ -262,54 +272,62 @@ export class LinearApiClient {
   }
 
   async createProject(
-    input: CreateProjectInput
+    input: CreateProjectInput,
   ): Promise<Awaited<ReturnType<SDKClient["createProject"]>>> {
-    return this.execute("create-project", async () => this.client.createProject(input));
+    return this.execute("create-project", async () =>
+      this.client.createProject(input),
+    );
   }
 
   async updateProject(
     projectIdentifier: UpdateProjectIdentifier,
-    input: UpdateProjectInput
+    input: UpdateProjectInput,
   ): Promise<Awaited<ReturnType<SDKClient["updateProject"]>>> {
     return this.execute("update-project", async () =>
-      this.client.updateProject(projectIdentifier, input)
+      this.client.updateProject(projectIdentifier, input),
     );
   }
 
   async createIssue(
-    input: CreateIssueInput
+    input: CreateIssueInput,
   ): Promise<Awaited<ReturnType<SDKClient["createIssue"]>>> {
     return this.execute("create-issue", async () => {
       const currentUser = await this.getCurrentUser();
+      const issueInput = input as IssueInputWithAssignee;
       return this.client.createIssue({
-        ...input,
-        assigneeId: input.assigneeId ?? currentUser.id
-      });
+        ...issueInput,
+        assigneeId: issueInput.assigneeId ?? currentUser.id,
+      } as CreateIssueInput);
     });
   }
 
   async updateIssue(
     issueIdentifier: UpdateIssueIdentifier,
-    input: UpdateIssueInput
+    input: UpdateIssueInput,
   ): Promise<Awaited<ReturnType<SDKClient["updateIssue"]>>> {
     return this.execute("update-issue", async () =>
-      this.client.updateIssue(issueIdentifier, input)
+      this.client.updateIssue(issueIdentifier, input),
     );
   }
 
   async createComment(
-    input: CreateCommentInput
+    input: CreateCommentInput,
   ): Promise<Awaited<ReturnType<SDKClient["createComment"]>>> {
-    return this.execute("create-comment", async () => this.client.createComment(input));
+    return this.execute("create-comment", async () =>
+      this.client.createComment(input),
+    );
   }
 
-  async createMilestone(input: CreateMilestoneInput): Promise<ProjectMilestoneMutation> {
+  async createMilestone(
+    input: CreateMilestoneInput,
+  ): Promise<ProjectMilestoneMutation> {
     return this.execute("create-milestone", async () => {
-      const milestoneCreator = (this.client as LinearClientWithMilestone).createProjectMilestone;
+      const milestoneCreator = (this.client as LinearClientWithMilestone)
+        .createProjectMilestone;
       if (!milestoneCreator) {
         throw new LinearApiClientError(
           "create-milestone",
-          "Current @linear/sdk version does not expose createProjectMilestone."
+          "Current @linear/sdk version does not expose createProjectMilestone.",
         );
       }
 
@@ -317,7 +335,10 @@ export class LinearApiClient {
     });
   }
 
-  private async execute<T>(operation: string, action: () => Promise<T>): Promise<T> {
+  private async execute<T>(
+    operation: string,
+    action: () => Promise<T>,
+  ): Promise<T> {
     try {
       return await action();
     } catch (error) {
@@ -329,12 +350,14 @@ export class LinearApiClient {
       throw new LinearApiClientError(
         operation,
         `Linear API operation failed (${operation}): ${message}`,
-        error
+        error,
       );
     }
   }
 }
 
-export function createLinearApiClient(config: LinearApiClientConfig = {}): LinearApiClient {
+export function createLinearApiClient(
+  config: LinearApiClientConfig = {},
+): LinearApiClient {
   return new LinearApiClient(config);
 }
