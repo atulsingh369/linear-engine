@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { assignIssueToUser, addCommentToIssue, getIssueStatusByKey, moveIssueByKeyToState, startIssueByKey } from "../linear/issue";
-import { assignProjectIssues, listProjectIssues as listIssuesByProject } from "../linear/project";
+import { assignProjectIssues, listProjectIssues as listIssuesByProject, listProjects as listAllProjects } from "../linear/project";
 import { syncProject } from "../linear/sync";
 import { EpicSpec, ProjectSpec, StorySpec } from "../linear/types";
 
@@ -27,6 +27,10 @@ export async function commentIssue(id: string, text: string) {
 
 export async function listProjectIssues(project: string) {
   return listIssuesByProject({ projectName: project });
+}
+
+export async function listProjects() {
+  return listAllProjects();
 }
 
 export async function syncSpec(filePath: string) {

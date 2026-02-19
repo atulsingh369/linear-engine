@@ -1,6 +1,6 @@
 import { createLinearApiClient, LinearApiClient } from "./client";
 
-type ProjectLike = {
+type BasicProjectLike = {
   id: string;
 };
 
@@ -35,6 +35,20 @@ export interface ListProjectIssuesInput {
   projectName: string;
 }
 
+type ListedProjectLike = {
+  id: string;
+  name?: string | null;
+  state?: string | null;
+  progress?: number | null;
+  startDate?: Date | string | null;
+  targetDate?: Date | string | null;
+  lead?: {
+    displayName?: string | null;
+  } | null;
+  createdAt?: Date | string;
+  updatedAt?: Date | string;
+};
+
 export interface ListedProjectIssue {
   id: string;
   identifier: string | null;
@@ -50,6 +64,20 @@ export interface ListedProjectIssue {
   };
 }
 
+export interface ListedProject {
+  id: string;
+  name: string;
+  state: string | null;
+  progress: number | null;
+  startDate: string | null;
+  targetDate: string | null;
+  lead: {
+    displayName: string | null;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
 export async function assignProjectIssues(
   input: AssignProjectIssuesInput,
   client: LinearApiClient = createLinearApiClient(),
@@ -61,7 +89,7 @@ export async function assignProjectIssues(
 
   const project = (await client.getProjectByName(
     projectName,
-  )) as ProjectLike | null;
+  )) as BasicProjectLike | null;
   if (!project) {
     throw new Error(`Project not found: ${projectName}`);
   }
@@ -103,7 +131,7 @@ export async function listProjectIssues(
 
   const project = (await client.getProjectByName(
     projectName,
-  )) as ProjectLike | null;
+  )) as BasicProjectLike | null;
   if (!project) {
     throw new Error(`Project not found: ${projectName}`);
   }
@@ -142,6 +170,34 @@ export async function listProjectIssues(
     });
 
   return mapped;
+}
+
+export async function listProjects(
+  client: LinearApiClient = createLinearApiClient(),
+): Promise<ListedProject[]> {
+  const projects = (await client.getProjects()) as ListedProjectLike[];
+
+  return projects
+    .map((project) => ({
+      id: project.id,
+      name: project.name ?? "",
+      state: project.state ?? null,
+      progress: typeof project.progress === "number" ? project.progress : null,
+      startDate: project.startDate ? String(project.startDate) : null,
+      targetDate: project.targetDate ? String(project.targetDate) : null,
+      lead: {
+        displayName: project.lead?.displayName ?? null,
+      },
+      createdAt: project.createdAt ? String(project.createdAt) : "",
+      updatedAt: project.updatedAt ? String(project.updatedAt) : "",
+    }))
+    .sort((a, b) => {
+      if (a.name !== b.name) {
+        return a.name.localeCompare(b.name);
+      }
+
+      return a.id.localeCompare(b.id);
+    });
 }
 
 function getIssueAssigneeId(issue: IssueLike): string | null {

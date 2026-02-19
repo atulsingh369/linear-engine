@@ -5,12 +5,13 @@ import {
   commentIssue,
   getIssueStatus,
   listProjectIssues,
+  listProjects,
   moveIssue,
   startIssue,
   syncSpec
 } from "./core";
 import { SyncAction, SyncStatus } from "./linear/sync";
-import { ListedProjectIssue } from "./linear/project";
+import { ListedProject, ListedProjectIssue } from "./linear/project";
 import { createLogger, Logger } from "./utils/logger";
 
 interface GlobalArgs {
@@ -29,6 +30,8 @@ interface AssignProjectCommandArgs extends GlobalArgs {
 interface ListProjectCommandArgs extends GlobalArgs {
   project: string;
 }
+
+interface ListProjectsCommandArgs extends GlobalArgs {}
 
 interface MoveCommandArgs extends GlobalArgs {
   id: string;
@@ -124,6 +127,14 @@ export async function runCli(argv: string[]): Promise<void> {
             },
             logger
           );
+        }
+      )
+      .command(
+        "projects",
+        "List all projects in Linear",
+        (cmd) => cmd,
+        async (args) => {
+          await handleListProjectsCommand({ json: Boolean(args.json) }, logger);
         }
       )
       .command(
@@ -286,6 +297,26 @@ async function handleListProjectCommand(
     }
 
     const lines = renderIssueTable(issues);
+    for (const line of lines) {
+      logger.info(line);
+    }
+  } catch (error) {
+    printError(error, args.json ?? false, logger);
+  }
+}
+
+async function handleListProjectsCommand(
+  args: ListProjectsCommandArgs,
+  logger: Logger
+): Promise<void> {
+  try {
+    const projects = await listProjects();
+    if (args.json) {
+      printOutput(projects, true, logger, []);
+      return;
+    }
+
+    const lines = renderProjectTable(projects);
     for (const line of lines) {
       logger.info(line);
     }
@@ -467,6 +498,48 @@ function renderIssueTable(issues: ListedProjectIssue[]): string[] {
     issue.createdAt,
     issue.parentId ?? "",
     issue.assignee.displayName ?? ""
+  ]);
+
+  const widths = columns.map((column, columnIndex) => {
+    const cellWidths = rows.map((row) => row[columnIndex].length);
+    return Math.max(column.length, ...cellWidths, 1);
+  });
+
+  const formatRow = (cells: string[]): string =>
+    cells
+      .map((cell, index) => cell.padEnd(widths[index], " "))
+      .join("  ");
+
+  const header = formatRow([...columns]);
+  const divider = widths.map((width) => "-".repeat(width)).join("  ");
+  const data = rows.map((row) => formatRow(row));
+
+  return [header, divider, ...data];
+}
+
+function renderProjectTable(projects: ListedProject[]): string[] {
+  const columns = [
+    "id",
+    "name",
+    "state",
+    "progress",
+    "startDate",
+    "targetDate",
+    "lead.displayName",
+    "createdAt",
+    "updatedAt"
+  ] as const;
+
+  const rows = projects.map((project) => [
+    project.id,
+    project.name,
+    project.state ?? "",
+    project.progress !== null ? String(project.progress) : "",
+    project.startDate ?? "",
+    project.targetDate ?? "",
+    project.lead.displayName ?? "",
+    project.createdAt,
+    project.updatedAt
   ]);
 
   const widths = columns.map((column, columnIndex) => {

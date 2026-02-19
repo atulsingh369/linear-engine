@@ -16,6 +16,10 @@
   - Lists project issues with deterministic `createdAt` ascending order.
   - Includes: `id`, `identifier`, `title`, `state.name`, `projectMilestoneId`, `createdAt`, `parentId`, `assignee.displayName`.
   - Default output is a readable table; `--json` returns a structured JSON array.
+- `linear projects [--json]`
+  - Lists all projects in the workspace.
+  - Includes: `id`, `name`, `state`, `progress`, `startDate`, `targetDate`, `lead.displayName`, `createdAt`, `updatedAt`.
+  - Default output is a readable table; `--json` returns a structured JSON array.
 
 ### Enhanced Commands
 
@@ -51,6 +55,8 @@
 - `linear start --id COG-12`
 - `linear list --project "Core Platform"`
 - `linear list --project "Core Platform" --json`
+- `linear projects`
+- `linear projects --json`
 - `linear assign-project --project "Core Platform"`
 - `linear assign-project --project "Core Platform" --force`
 - `linear sync --file ./specs/project.json --json`
@@ -71,6 +77,8 @@
   - `Total issues: N`
   - `Assigned count: N`
   - `Skipped count: N`
+- Projects list (JSON item shape):
+  - `{"id":"...","name":"...","state":"...","progress":42,"startDate":"...","targetDate":"...","lead":{"displayName":"..."},"createdAt":"...","updatedAt":"..."}`
 
 ## Failure Modes
 
