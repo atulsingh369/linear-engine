@@ -1,4 +1,5 @@
 import { createLinearApiClient, LinearApiClient } from "./client";
+import { getIssueAssigneeId } from "./issue";
 import { EpicSpec, ProjectSpec } from "./types";
 
 const MANAGED_METADATA_LINE = "managedBy: linear-engine";
@@ -447,17 +448,6 @@ async function resolveDesiredAssigneeId(
   throw new Error(
     `Unable to resolve assignee reference: ${normalizedReference}`,
   );
-}
-
-function getIssueAssigneeId(issue: {
-  assigneeId?: string | null;
-  assignee?: { id: string } | null;
-}): string | null {
-  if (issue.assigneeId) {
-    return issue.assigneeId;
-  }
-
-  return issue.assignee?.id ?? null;
 }
 
 function findIssueByTitle(
