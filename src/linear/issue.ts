@@ -229,6 +229,17 @@ async function moveIssueToStateInternal(
   };
 }
 
+export function getIssueAssigneeId(issue: {
+  assigneeId?: string | null;
+  assignee?: { id: string } | null;
+}): string | null {
+  if (issue.assigneeId) {
+    return issue.assigneeId;
+  }
+
+  return issue.assignee?.id ?? null;
+}
+
 async function getRequiredIssueByKey(
   issueKeyInput: string,
   client: LinearApiClient
@@ -261,7 +272,7 @@ function resolveAssigneeLabel(
   issue: IssueLike,
   users: Array<{ id: string; displayName?: string | null; name?: string | null; email?: string | null }>
 ): string {
-  const assigneeId = issue.assigneeId ?? issue.assignee?.id ?? null;
+  const assigneeId = getIssueAssigneeId(issue);
   if (!assigneeId) {
     return "Unassigned";
   }

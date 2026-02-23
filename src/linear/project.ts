@@ -1,4 +1,5 @@
 import { createLinearApiClient, LinearApiClient } from "./client";
+import { getIssueAssigneeId } from "./issue";
 
 type BasicProjectLike = {
   id: string;
@@ -198,14 +199,6 @@ export async function listProjects(
 
       return a.id.localeCompare(b.id);
     });
-}
-
-function getIssueAssigneeId(issue: IssueLike): string | null {
-  if (issue.assigneeId) {
-    return issue.assigneeId;
-  }
-
-  return issue.assignee?.id ?? null;
 }
 
 async function getStateNameMapsByTeam(
