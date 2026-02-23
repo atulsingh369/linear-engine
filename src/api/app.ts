@@ -38,7 +38,7 @@ const app = new Hono();
 
 app.use("*", loggerMiddleware);
 app.use("*", async (c, next) => {
-  if (c.req.path === "/health" || c.req.path === "/debug/env") {
+  if (c.req.path === "/health") {
     await next();
     return;
   }
@@ -47,12 +47,6 @@ app.use("*", async (c, next) => {
 });
 
 app.get("/health", (c) => c.json({ ok: true }));
-app.get("/debug/env", (c) =>
-  c.json({
-    hasExecSecret: Boolean(process.env.EXEC_SECRET),
-    hasLinearKey: Boolean(process.env.LINEAR_API_KEY)
-  })
-);
 
 app.get("/status/:id", async (c) => {
   try {

@@ -13,7 +13,6 @@
   - `x-exec-secret: <EXEC_SECRET>`
 - Public routes (no auth required):
   - `GET /health`
-  - `GET /debug/env`
 - If missing or invalid:
   - `401 {"error":"Unauthorized"}`
 - If server misconfigured:
@@ -30,18 +29,6 @@
 ### Response
 
 - `{"ok":true}`
-
-## Debug (optional)
-
-- `GET /debug/env`
-
-### Example
-
-- `curl http://localhost:3001/debug/env`
-
-### Response
-
-- `{"hasExecSecret":true,"hasLinearKey":true}`
 
 ## List Issues
 
