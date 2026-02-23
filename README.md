@@ -224,7 +224,6 @@ x-exec-secret: <EXEC_SECRET>
 Public routes:
 
 - `GET /health`
-- `GET /debug/env`
 
 Protected routes:
 
