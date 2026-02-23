@@ -77,6 +77,8 @@ export class LinearApiClientError extends Error {
 export class LinearApiClient {
   private readonly client: SDKClient;
   private currentUser: ViewerNode | null = null;
+  private usersPromise: Promise<UserNode[]> | null = null;
+  private projectsPromise: Promise<ProjectNode[]> | null = null;
 
   constructor(config: LinearApiClientConfig = {}) {
     const apiKey = config.apiKey ?? process.env.LINEAR_API_KEY;
@@ -110,10 +112,13 @@ export class LinearApiClient {
   }
 
   async getUsers(): Promise<UserNode[]> {
-    return this.execute("get-users", async () => {
-      const result = await this.client.users();
-      return result.nodes;
-    });
+    if (!this.usersPromise) {
+      this.usersPromise = this.execute("get-users", async () => {
+        const result = await this.client.users();
+        return result.nodes;
+      });
+    }
+    return this.usersPromise;
   }
 
   async findUserByIdentifier(identifier: string): Promise<UserNode | null> {
@@ -151,10 +156,13 @@ export class LinearApiClient {
   }
 
   async getProjects(): Promise<ProjectNode[]> {
-    return this.execute("get-projects", async () => {
-      const result = await this.client.projects();
-      return result.nodes;
-    });
+    if (!this.projectsPromise) {
+      this.projectsPromise = this.execute("get-projects", async () => {
+        const result = await this.client.projects();
+        return result.nodes;
+      });
+    }
+    return this.projectsPromise;
   }
 
   async getProjectByName(name: string): Promise<ProjectNode | null> {
