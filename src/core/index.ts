@@ -70,7 +70,7 @@ async function loadProjectSpecFromFile(filePath: string): Promise<ProjectSpec> {
   return parsed;
 }
 
-function isProjectSpec(value: unknown): value is ProjectSpec {
+export function isProjectSpec(value: unknown): value is ProjectSpec {
   if (!isRecord(value)) {
     return false;
   }
@@ -110,7 +110,7 @@ function isProjectSpec(value: unknown): value is ProjectSpec {
   return true;
 }
 
-function isEpicSpec(value: unknown): value is EpicSpec {
+export function isEpicSpec(value: unknown): value is EpicSpec {
   if (!isRecord(value)) {
     return false;
   }
@@ -141,7 +141,7 @@ function isEpicSpec(value: unknown): value is EpicSpec {
   return true;
 }
 
-function isStorySpec(value: unknown): value is StorySpec {
+export function isStorySpec(value: unknown): value is StorySpec {
   if (!isRecord(value)) {
     return false;
   }
